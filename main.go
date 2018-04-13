@@ -222,15 +222,9 @@ func export() string {
 }
 
 func isRepeated(label descriptor.FieldDescriptorProto_Label) bool {
-	if label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
-		return true
-	}
-	return false
+	return label == descriptor.FieldDescriptorProto_LABEL_REPEATED
 }
 
 func isMessage(t descriptor.FieldDescriptorProto_Type) bool {
-	if t == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
-		return true
-	}
-	return false
+	return t == descriptor.FieldDescriptorProto_TYPE_MESSAGE
 }
