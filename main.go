@@ -58,6 +58,12 @@ func main() {
 			// generate key, e.g. ".trpc.MatchesPoints"
 			key := "." + f.GetPackage() + "." + message.GetName()
 			messages[key] = message
+
+			// get nested types for maps, i.e. <string, Something>
+			for _, t := range message.GetNestedType() {
+				subkey := key + "." + t.GetName()
+				messages[subkey] = t
+			}
 		}
 
 		// services
