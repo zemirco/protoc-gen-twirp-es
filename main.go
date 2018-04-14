@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"strings"
 	"text/template"
@@ -34,13 +35,20 @@ const {{.Name}} = async (input) => {
 {{.Exports}}
 `
 
+// Method comment
 type Method struct {
 	Name       string
 	OutputName string
 	Field      string
 }
 
+// Methods comment
 var Methods []Method
+
+func getTypeName(s string) string {
+	parts := strings.Split(s, ".")
+	return parts[len(parts)-1]
+}
 
 func main() {
 	in, err := ioutil.ReadAll(os.Stdin)
@@ -55,6 +63,33 @@ func main() {
 	for _, f := range req.ProtoFile {
 		// messages
 		for _, message := range f.MessageType {
+			var s bytes.Buffer
+
+			// log.Println(message)
+			s.WriteString(fmt.Sprintf("class %s {\n", message.GetName()))
+
+			// log.Println(message.GetField())
+			// generate constructor
+			s.WriteString("  constructor (o) {\n")
+			for _, field := range message.GetField() {
+				log.Println(field)
+				if isMessage(field.GetType()) {
+					s.WriteString(fmt.Sprintf("    this.%s = new %s(o.%s)\n", field.GetName(), getTypeName(field.GetTypeName()), field.GetName()))
+				} else {
+					s.WriteString(fmt.Sprintf("    this.%s = o.%s || %s\n", field.GetName(), field.GetName(), zv(field.GetType())))
+				}
+			}
+			s.WriteString("  }\n")
+
+			// generate setters
+			// for _, field := range message.GetField() {
+			// 	// log.Println("field: ", field)
+			// 	s.WriteString(fmt.Sprintf("  get %s () {return this.%s || %s}\n", field.GetName(), field.GetName(), zv(field.GetType())))
+			// }
+
+			s.WriteString(fmt.Sprintf("}\n"))
+
+			log.Println(s.String())
 			// generate key, e.g. ".trpc.MatchesPoints"
 			key := "." + f.GetPackage() + "." + message.GetName()
 			messages[key] = message
@@ -63,6 +98,7 @@ func main() {
 			for _, t := range message.GetNestedType() {
 				subkey := key + "." + t.GetName()
 				messages[subkey] = t
+				// log.Println(t)
 			}
 		}
 
@@ -139,7 +175,26 @@ func genField(ff []*descriptor.FieldDescriptorProto, id ...string) string {
 
 		// get field type from type map
 		m := messages[f.GetTypeName()]
-		if isRepeated(f.GetLabel()) {
+		if isMap(f.GetTypeName()) {
+			nested := messages[f.GetTypeName()]
+			nestedValue := nested.GetField()[1]
+			nestedValueType := messages[nestedValue.GetTypeName()]
+
+			ids := append(id, f.GetName())
+			j := strings.Join(ids, ".")
+
+			// start loop
+			b.WriteString(fmt.Sprintf("%s: Object.entries(%s).reduce((a, [k, v]) => {\n", f.GetName(), j))
+			b.WriteString(fmt.Sprintf("a[k] = {\n"))
+
+			// generate fields
+			b.WriteString(genField(nestedValueType.GetField(), []string{"v"}...))
+
+			// end loop
+			b.WriteString("}\n")
+			b.WriteString("return a\n")
+			b.WriteString(fmt.Sprintf("}, {})%s\n", colon))
+		} else if isRepeated(f.GetLabel()) {
 			ids := append(id, f.GetName())
 			joined := strings.Join(ids, ".")
 
@@ -233,4 +288,8 @@ func isRepeated(label descriptor.FieldDescriptorProto_Label) bool {
 
 func isMessage(t descriptor.FieldDescriptorProto_Type) bool {
 	return t == descriptor.FieldDescriptorProto_TYPE_MESSAGE
+}
+
+func isMap(typeName string) bool {
+	return strings.HasSuffix(typeName, "Entry")
 }
