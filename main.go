@@ -20,10 +20,13 @@ const blueprint = `
 {{$ServiceName := .ServiceName}}
 {{- range $i, $method := .Methods}}
 const {{.Name}} = async (input) => {
-	const res = await fetch('twirp/trpc.{{$ServiceName}}/{{.Name}}', {
+	const token = document.querySelector('meta[name="csrf-token"]').content
+	const res = await fetch('/twirp/trpc.{{$ServiceName}}/{{.Name}}', {
 		headers: {
+			'X-CSRF-Token': token,
 			'Content-Type': 'application/json'
 		},
+		credentials: 'same-origin',
 		method: 'POST',
 		body: JSON.stringify(input)
 	})
