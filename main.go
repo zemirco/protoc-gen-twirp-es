@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 	"text/template"
@@ -17,11 +16,10 @@ import (
 var messages = make(map[string]*descriptor.DescriptorProto)
 
 const blueprint = `
-{{$ServiceName := .ServiceName}}
 {{- range $i, $method := .Methods}}
 const {{.Name}} = async (input) => {
 	const token = document.querySelector('meta[name="csrf-token"]').content
-	const res = await fetch('/twirp/trpc.{{$ServiceName}}/{{.Name}}', {
+	const res = await fetch('/twirp/trpc.{{.Service}}/{{.Name}}', {
 		headers: {
 			'X-CSRF-Token': token,
 			'Content-Type': 'application/json'
@@ -40,6 +38,7 @@ const {{.Name}} = async (input) => {
 
 // Method comment
 type Method struct {
+	Service    string
 	Name       string
 	OutputName string
 	Field      string
@@ -66,33 +65,6 @@ func main() {
 	for _, f := range req.ProtoFile {
 		// messages
 		for _, message := range f.MessageType {
-			var s bytes.Buffer
-
-			// log.Println(message)
-			s.WriteString(fmt.Sprintf("class %s {\n", message.GetName()))
-
-			// log.Println(message.GetField())
-			// generate constructor
-			s.WriteString("  constructor (o) {\n")
-			for _, field := range message.GetField() {
-				log.Println(field)
-				if isMessage(field.GetType()) {
-					s.WriteString(fmt.Sprintf("    this.%s = new %s(o.%s)\n", field.GetName(), getTypeName(field.GetTypeName()), field.GetName()))
-				} else {
-					s.WriteString(fmt.Sprintf("    this.%s = o.%s || %s\n", field.GetName(), field.GetName(), zv(field.GetType())))
-				}
-			}
-			s.WriteString("  }\n")
-
-			// generate setters
-			// for _, field := range message.GetField() {
-			// 	// log.Println("field: ", field)
-			// 	s.WriteString(fmt.Sprintf("  get %s () {return this.%s || %s}\n", field.GetName(), field.GetName(), zv(field.GetType())))
-			// }
-
-			s.WriteString(fmt.Sprintf("}\n"))
-
-			log.Println(s.String())
 			// generate key, e.g. ".trpc.MatchesPoints"
 			key := "." + f.GetPackage() + "." + message.GetName()
 			messages[key] = message
@@ -101,7 +73,6 @@ func main() {
 			for _, t := range message.GetNestedType() {
 				subkey := key + "." + t.GetName()
 				messages[subkey] = t
-				// log.Println(t)
 			}
 		}
 
@@ -125,6 +96,7 @@ func main() {
 				s.WriteString("}\n")
 
 				m := Method{
+					Service:    service.GetName(),
 					Name:       method.GetName(),
 					OutputName: outputType.GetName(),
 					Field:      s.String(),
@@ -137,13 +109,13 @@ func main() {
 
 	parsed := template.Must(template.New("").Parse(blueprint))
 	data := struct {
-		Methods     []Method
-		ServiceName string
-		Exports     string
+		Methods []Method
+		// ServiceName string
+		Exports string
 	}{
-		Methods:     Methods,
-		ServiceName: "Haberdasher",
-		Exports:     export(),
+		Methods: Methods,
+		// ServiceName: "Haberdasher",
+		Exports: export(),
 	}
 	var tmp bytes.Buffer
 	if err := parsed.Execute(&tmp, data); err != nil {
