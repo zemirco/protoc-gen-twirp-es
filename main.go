@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
 )
@@ -46,11 +46,6 @@ type Method struct {
 
 // Methods comment
 var Methods []Method
-
-func getTypeName(s string) string {
-	parts := strings.Split(s, ".")
-	return parts[len(parts)-1]
-}
 
 func main() {
 	in, err := ioutil.ReadAll(os.Stdin)
@@ -150,7 +145,12 @@ func genField(ff []*descriptor.FieldDescriptorProto, id ...string) string {
 
 		// get field type from type map
 		m := messages[f.GetTypeName()]
-		if isMap(f.GetTypeName()) {
+
+		if isTimestamp(f.GetTypeName()) {
+			ids := append(id, f.GetName())
+			s := strings.Join(ids, ".")
+			b.WriteString(fmt.Sprintf("%s: %s || \"\"%s\n", f.GetName(), s, colon))
+		} else if isMap(f.GetTypeName()) {
 			nested := messages[f.GetTypeName()]
 			nestedValue := nested.GetField()[1]
 			nestedValueType := messages[nestedValue.GetTypeName()]
@@ -267,4 +267,10 @@ func isMessage(t descriptor.FieldDescriptorProto_Type) bool {
 
 func isMap(typeName string) bool {
 	return strings.HasSuffix(typeName, "Entry")
+}
+
+// handle well known type .google.protobuf.Timestamp
+// has fields "seconds" and "nanos" but is single string in JSON
+func isTimestamp(typeName string) bool {
+	return typeName == ".google.protobuf.Timestamp"
 }
