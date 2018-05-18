@@ -80,22 +80,34 @@ func main() {
 				outputType := messages[method.GetOutputType()]
 				var s bytes.Buffer
 
-				// open type json
-				s.WriteString(fmt.Sprintf("const %s = {\n", outputType.GetName()))
+				var m Method
 
-				// generate fields
-				// "data" comes from template which holds json from fetch call
-				s.WriteString(genField(outputType.Field, "data"))
-
-				// close type json
-				s.WriteString("}\n")
-
-				m := Method{
-					Service:    service.GetName(),
-					Name:       method.GetName(),
-					OutputName: outputType.GetName(),
-					Field:      s.String(),
+				if isPrimitive(outputType.GetName()) {
+					// return result directly
+					// e.g.
+					// 	const data = await res.json()
+					// 	return data
+					m = Method{
+						Service:    service.GetName(),
+						Name:       method.GetName(),
+						OutputName: "data",
+					}
+				} else {
+					// open type json
+					s.WriteString(fmt.Sprintf("const %s = {\n", outputType.GetName()))
+					// generate fields
+					// "data" comes from template which holds json from fetch call
+					s.WriteString(genField(outputType.Field, "data"))
+					// close type json
+					s.WriteString("}\n")
+					m = Method{
+						Service:    service.GetName(),
+						Name:       method.GetName(),
+						OutputName: outputType.GetName(),
+						Field:      s.String(),
+					}
 				}
+
 				Methods = append(Methods, m)
 			}
 
@@ -267,6 +279,10 @@ func isMessage(t descriptor.FieldDescriptorProto_Type) bool {
 
 func isMap(typeName string) bool {
 	return strings.HasSuffix(typeName, "Entry")
+}
+
+func isPrimitive(name string) bool {
+	return name == "StringValue"
 }
 
 // handle well known type .google.protobuf.Timestamp
