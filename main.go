@@ -30,7 +30,7 @@ const {{.Name}} = async (input) => {
 	})
 	const data = await res.json()
 	{{.Field}}
-	return {{.OutputName}}
+	return data.code ? data : {{.OutputName}}
 }
 {{end}}
 {{.Exports}}
