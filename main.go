@@ -186,7 +186,7 @@ func genField(ff []*descriptor.FieldDescriptorProto, id ...string) string {
 			joined := strings.Join(ids, ".")
 
 			// start javascript map function
-			b.WriteString(fmt.Sprintf("%s: %s.map(v => {\n", f.GetName(), joined))
+			b.WriteString(fmt.Sprintf("%s: %s ? %s.map(v => {\n", f.GetName(), joined, joined))
 			fields := m.GetField()
 			if len(fields) == 0 {
 				// array of primitive values
@@ -206,7 +206,7 @@ func genField(ff []*descriptor.FieldDescriptorProto, id ...string) string {
 			}
 
 			// close javascript map function
-			b.WriteString(fmt.Sprintf("})%s\n", colon))
+			b.WriteString(fmt.Sprintf("}) : []%s\n", colon))
 		} else if isMessage(f.GetType()) {
 			ids := append(id, f.GetName())
 
