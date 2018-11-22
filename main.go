@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"strings"
 	"text/template"
@@ -17,8 +18,9 @@ var messages = make(map[string]*descriptor.DescriptorProto)
 
 const blueprint = `
 {{- range $i, $method := .Methods}}
-const {{.Name}} = async (input) => {
-	const token = document.querySelector('meta[name="csrf-token"]').content
+const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
+	const meta = document.querySelector('meta[name="csrf-token"]') as HTMLElement
+	const token = meta.content
 	const res = await fetch('/twirp/trpc.{{.Service}}/{{.Name}}', {
 		headers: {
 			'X-CSRF-Token': token,
@@ -42,6 +44,8 @@ type Method struct {
 	Name       string
 	OutputName string
 	Field      string
+	OutputType string
+	InputType  string
 }
 
 // Methods comment
@@ -78,9 +82,16 @@ func main() {
 			for _, method := range service.Method {
 
 				outputType := messages[method.GetOutputType()]
+				inputType := messages[method.GetInputType()]
 				var s bytes.Buffer
 
 				var m Method
+
+				// fmt.Println(method.GetName())
+				// log.Println(method.GetName(), method.GetInputType(), method.GetOutputType())
+				log.Println("out:", outputType)
+				log.Println("in: ", inputType)
+				log.Println("---")
 
 				if isPrimitive(outputType.GetName()) {
 					// return result directly
@@ -91,6 +102,8 @@ func main() {
 						Service:    service.GetName(),
 						Name:       method.GetName(),
 						OutputName: "data",
+						OutputType: outputType.GetName(),
+						InputType:  inputType.GetName(),
 					}
 				} else {
 					// open type json
@@ -105,6 +118,8 @@ func main() {
 						Name:       method.GetName(),
 						OutputName: outputType.GetName(),
 						Field:      s.String(),
+						OutputType: outputType.GetName(),
+						InputType:  inputType.GetName(),
 					}
 				}
 
@@ -290,3 +305,10 @@ func isPrimitive(name string) bool {
 func isTimestamp(typeName string) bool {
 	return typeName == ".google.protobuf.Timestamp"
 }
+
+// func getTypeScriptType(name string) string {
+// 	if name == "StringValue" {
+// 		return "string"
+// 	}
+// 	return name
+// }
