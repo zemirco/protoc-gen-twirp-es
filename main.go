@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 	"text/template"
@@ -19,7 +18,7 @@ var messages = make(map[string]*descriptor.DescriptorProto)
 const blueprint = `
 {{- range $i, $method := .Methods}}
 const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
-	const meta = document.querySelector('meta[name="csrf-token"]') as HTMLElement
+	const meta = document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement
 	const token = meta.content
 	const res = await fetch('/twirp/trpc.{{.Service}}/{{.Name}}', {
 		headers: {
@@ -30,9 +29,13 @@ const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
 		method: 'POST',
 		body: JSON.stringify(input)
 	})
-	const data = await res.json()
+	if (res.status !== 200) {
+		throw new Error(res.statusText)
+	}
+	const data = await res.json() as {{.OutputType}}
+
 	{{.Field}}
-	return data.code ? data : {{.OutputName}}
+	return {{.OutputName}}
 }
 {{end}}
 {{.Exports}}
@@ -87,12 +90,6 @@ func main() {
 
 				var m Method
 
-				// fmt.Println(method.GetName())
-				// log.Println(method.GetName(), method.GetInputType(), method.GetOutputType())
-				log.Println("out:", outputType)
-				log.Println("in: ", inputType)
-				log.Println("---")
-
 				if isPrimitive(outputType.GetName()) {
 					// return result directly
 					// e.g.
@@ -144,7 +141,7 @@ func main() {
 		panic(err)
 	}
 
-	name := strings.Replace(req.FileToGenerate[0], ".proto", ".js", -1)
+	name := strings.Replace(req.FileToGenerate[0], ".proto", ".ts", -1)
 	content := tmp.String()
 	res := &plugin.CodeGeneratorResponse{}
 	res.File = append(res.File, &plugin.CodeGeneratorResponse_File{
@@ -305,10 +302,3 @@ func isPrimitive(name string) bool {
 func isTimestamp(typeName string) bool {
 	return typeName == ".google.protobuf.Timestamp"
 }
-
-// func getTypeScriptType(name string) string {
-// 	if name == "StringValue" {
-// 		return "string"
-// 	}
-// 	return name
-// }
