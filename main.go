@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"strings"
 	"text/template"
@@ -41,6 +42,15 @@ const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
 {{.Exports}}
 `
 
+const stuff = `
+interface {{.Message.GetName}} {
+	{{ $Message := .Message }}
+	{{- range $i, $field := .Message.GetField}}
+		{{.Name}}: {{getTypeScriptType $Message .}}
+	{{- end}}
+}
+`
+
 // Method comment
 type Method struct {
 	Service    string
@@ -53,6 +63,38 @@ type Method struct {
 
 // Methods comment
 var Methods []Method
+
+func isBuiltIn(name string) bool {
+	switch name {
+	case
+		"Timestamp",
+		"DoubleValue",
+		"FloatValue",
+		"Int64Value",
+		"UInt64Value",
+		"Int32Value",
+		"Fixed64Value",
+		"Fixed32Value",
+		"BoolValue",
+		"StringValue",
+		"GroupValue",
+		"MessageValue",
+		"BytesValue",
+		"UInt32Value",
+		"EnumValue",
+		"Sfixed32Value",
+		"Sfixed64Value",
+		"Sint32Value",
+		"Sint64Value":
+		return true
+	default:
+		return false
+	}
+}
+
+var funcMap = template.FuncMap{
+	"getTypeScriptType": getTypeScriptType,
+}
 
 func main() {
 	in, err := ioutil.ReadAll(os.Stdin)
@@ -67,15 +109,35 @@ func main() {
 	for _, f := range req.ProtoFile {
 		// messages
 		for _, message := range f.MessageType {
-			// generate key, e.g. ".trpc.MatchesPoints"
-			key := "." + f.GetPackage() + "." + message.GetName()
-			messages[key] = message
 
-			// get nested types for maps, i.e. <string, Something>
-			for _, t := range message.GetNestedType() {
-				subkey := key + "." + t.GetName()
-				messages[subkey] = t
+			if isBuiltIn(message.GetName()) {
+				continue
 			}
+
+			parsed := template.Must(template.New("").Funcs(funcMap).Parse(stuff))
+			data := struct {
+				Message *descriptor.DescriptorProto
+			}{
+				Message: message,
+			}
+			var tmp bytes.Buffer
+			if err := parsed.Execute(&tmp, data); err != nil {
+				panic(err)
+			}
+			log.Println(tmp.String())
+			log.Println("---")
+
+			continue
+
+			// // generate key, e.g. ".trpc.MatchesPoints"
+			// key := "." + f.GetPackage() + "." + message.GetName()
+			// messages[key] = message
+
+			// // get nested types for maps, i.e. <string, Something>
+			// for _, t := range message.GetNestedType() {
+			// 	subkey := key + "." + t.GetName()
+			// 	messages[subkey] = t
+			// }
 		}
 
 		// services
@@ -265,6 +327,46 @@ func zv(t descriptor.FieldDescriptorProto_Type) string {
 	default:
 		return "{}"
 	}
+}
+
+func getTypeScriptType(message *descriptor.DescriptorProto, field *descriptor.FieldDescriptorProto) string {
+	var result string
+	switch field.GetType() {
+	case descriptor.FieldDescriptorProto_TYPE_DOUBLE,
+		descriptor.FieldDescriptorProto_TYPE_FLOAT,
+		descriptor.FieldDescriptorProto_TYPE_INT64,
+		descriptor.FieldDescriptorProto_TYPE_UINT64,
+		descriptor.FieldDescriptorProto_TYPE_INT32,
+		descriptor.FieldDescriptorProto_TYPE_FIXED64,
+		descriptor.FieldDescriptorProto_TYPE_FIXED32,
+		descriptor.FieldDescriptorProto_TYPE_UINT32,
+		descriptor.FieldDescriptorProto_TYPE_SFIXED32,
+		descriptor.FieldDescriptorProto_TYPE_SFIXED64,
+		descriptor.FieldDescriptorProto_TYPE_SINT32,
+		descriptor.FieldDescriptorProto_TYPE_SINT64:
+		result = "number"
+	case descriptor.FieldDescriptorProto_TYPE_BOOL:
+		result = "boolean"
+	case descriptor.FieldDescriptorProto_TYPE_STRING:
+		result = "string"
+	default:
+		if isTimestamp(field.GetTypeName()) {
+			result = "string"
+		} else if isMap(field.GetTypeName()) {
+			msg := message.GetNestedType()[0]
+			fields := msg.GetField()
+			key := fields[0]
+			value := fields[1]
+			result = fmt.Sprintf("{ [name: %s]: %s }", getTypeScriptType(msg, key), getTypeScriptType(msg, value))
+		} else {
+			parts := strings.Split(field.GetTypeName(), ".")
+			result = parts[len(parts)-1]
+		}
+	}
+	if isRepeated(field.GetLabel()) && !isMap(field.GetTypeName()) {
+		result += "[]"
+	}
+	return result
 }
 
 // generate last export line for javascript file
