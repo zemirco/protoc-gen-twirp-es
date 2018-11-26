@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 	"text/template"
@@ -44,12 +43,16 @@ const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
 
 const stuff = `
 interface {{.Message.GetName}} {
-	{{ $Message := .Message }}
-	{{- range $i, $field := .Message.GetField}}
-		{{.Name}}: {{getTypeScriptType $Message .}}
-	{{- end}}
+  {{- $Message := .Message -}}
+  {{- range $i, $field := .Message.GetField}}
+  {{.Name}}: {{getTypeScriptType $Message .}}
+  {{- end}}
 }
 `
+
+var interfaces = []string{
+	"type Empty = object",
+}
 
 // Method comment
 type Method struct {
@@ -67,6 +70,7 @@ var Methods []Method
 func isBuiltIn(name string) bool {
 	switch name {
 	case
+		"Empty",
 		"Timestamp",
 		"DoubleValue",
 		"FloatValue",
@@ -110,34 +114,29 @@ func main() {
 		// messages
 		for _, message := range f.MessageType {
 
-			if isBuiltIn(message.GetName()) {
-				continue
+			if !isBuiltIn(message.GetName()) {
+				parsed := template.Must(template.New("").Funcs(funcMap).Parse(stuff))
+				data := struct {
+					Message *descriptor.DescriptorProto
+				}{
+					Message: message,
+				}
+				var tmp bytes.Buffer
+				if err := parsed.Execute(&tmp, data); err != nil {
+					panic(err)
+				}
+				interfaces = append(interfaces, tmp.String())
 			}
 
-			parsed := template.Must(template.New("").Funcs(funcMap).Parse(stuff))
-			data := struct {
-				Message *descriptor.DescriptorProto
-			}{
-				Message: message,
+			// generate key, e.g. ".trpc.MatchesPoints"
+			key := "." + f.GetPackage() + "." + message.GetName()
+			messages[key] = message
+
+			// get nested types for maps, i.e. <string, Something>
+			for _, t := range message.GetNestedType() {
+				subkey := key + "." + t.GetName()
+				messages[subkey] = t
 			}
-			var tmp bytes.Buffer
-			if err := parsed.Execute(&tmp, data); err != nil {
-				panic(err)
-			}
-			log.Println(tmp.String())
-			log.Println("---")
-
-			continue
-
-			// // generate key, e.g. ".trpc.MatchesPoints"
-			// key := "." + f.GetPackage() + "." + message.GetName()
-			// messages[key] = message
-
-			// // get nested types for maps, i.e. <string, Something>
-			// for _, t := range message.GetNestedType() {
-			// 	subkey := key + "." + t.GetName()
-			// 	messages[subkey] = t
-			// }
 		}
 
 		// services
@@ -203,6 +202,7 @@ func main() {
 		panic(err)
 	}
 
+	// generate file with functions
 	name := strings.Replace(req.FileToGenerate[0], ".proto", ".ts", -1)
 	content := tmp.String()
 	res := &plugin.CodeGeneratorResponse{}
@@ -210,6 +210,15 @@ func main() {
 		Name:    &name,
 		Content: &content,
 	})
+
+	// generate file with type definitions
+	interfacesName := strings.Replace(req.FileToGenerate[0], ".proto", ".d.ts", -1)
+	interfacesContent := strings.Join(interfaces, "")
+	res.File = append(res.File, &plugin.CodeGeneratorResponse_File{
+		Name:    &interfacesName,
+		Content: &interfacesContent,
+	})
+
 	out, err := proto.Marshal(res)
 	if err != nil {
 		panic(err)
