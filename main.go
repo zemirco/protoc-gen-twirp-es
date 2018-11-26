@@ -51,7 +51,9 @@ interface {{.Message.GetName}} {
 `
 
 var interfaces = []string{
-	"type Empty = object",
+	"type Empty = object\n",
+	"\n",
+	"type StringValue = string\n",
 }
 
 // Method comment
@@ -212,7 +214,7 @@ func main() {
 	})
 
 	// generate file with type definitions
-	interfacesName := strings.Replace(req.FileToGenerate[0], ".proto", ".d.ts", -1)
+	interfacesName := "../controllers/" + strings.Replace(req.FileToGenerate[0], ".proto", ".d.ts", -1)
 	interfacesContent := strings.Join(interfaces, "")
 	res.File = append(res.File, &plugin.CodeGeneratorResponse_File{
 		Name:    &interfacesName,
