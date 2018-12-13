@@ -17,7 +17,7 @@ var messages = make(map[string]*descriptor.DescriptorProto)
 
 const blueprint = `
 {{- range $i, $method := .Methods}}
-const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
+export const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
 	const meta = document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement
 	const token = meta.content
 	const res = await fetch('/twirp/trpc.{{.Service}}/{{.Name}}', {
@@ -32,36 +32,36 @@ const {{.Name}} = async (input: {{.InputType}}): Promise<{{.OutputType}}> => {
 	if (res.status !== 200) {
 		throw new Error(res.statusText)
 	}
-	const data = await res.json() as {{.OutputType}}
-
-	{{.Field}}
-	return {{.OutputName}}
+	const data = await res.json()
+	return new {{.OutputType}}(data)
 }
 {{end}}
-{{.Exports}}
 `
 
-const stuff = `
-interface {{.Message.GetName}} {
-  {{- $Message := .Message -}}
-  {{- range $i, $field := .Message.GetField}}
-  {{.Name}}: {{getTypeScriptType $Message .}}
-  {{- end}}
-}
-`
-
-var interfaces = []string{
-	"type Empty = object\n",
+var classes = []string{
+	"export class Empty extends Object{}\n",
 	"\n",
-	"type StringValue = string\n",
+	"export class StringValue extends String{}\n",
 }
+
+const class = `
+export class {{.Message.GetName}} {
+{{- $Message := .Message -}}
+{{- range $i, $field := .Message.GetField}}
+  {{.Name}}: {{getTypeScriptType $Message .}}
+{{- end}}
+  constructor(o) {
+    {{- range $i, $field := .Message.GetField}}
+    {{initiate $Message .}}
+    {{- end}}
+  }
+}
+`
 
 // Method comment
 type Method struct {
 	Service    string
 	Name       string
-	OutputName string
-	Field      string
 	OutputType string
 	InputType  string
 }
@@ -100,6 +100,7 @@ func isBuiltIn(name string) bool {
 
 var funcMap = template.FuncMap{
 	"getTypeScriptType": getTypeScriptType,
+	"initiate":          initiate,
 }
 
 func main() {
@@ -117,7 +118,7 @@ func main() {
 		for _, message := range f.MessageType {
 
 			if !isBuiltIn(message.GetName()) {
-				parsed := template.Must(template.New("").Funcs(funcMap).Parse(stuff))
+				parsed := template.Must(template.New("").Funcs(funcMap).Parse(class))
 				data := struct {
 					Message *descriptor.DescriptorProto
 				}{
@@ -127,7 +128,7 @@ func main() {
 				if err := parsed.Execute(&tmp, data); err != nil {
 					panic(err)
 				}
-				interfaces = append(interfaces, tmp.String())
+				classes = append(classes, tmp.String())
 			}
 
 			// generate key, e.g. ".trpc.MatchesPoints"
@@ -149,38 +150,12 @@ func main() {
 
 				outputType := messages[method.GetOutputType()]
 				inputType := messages[method.GetInputType()]
-				var s bytes.Buffer
 
-				var m Method
-
-				if isPrimitive(outputType.GetName()) {
-					// return result directly
-					// e.g.
-					// 	const data = await res.json()
-					// 	return data
-					m = Method{
-						Service:    service.GetName(),
-						Name:       method.GetName(),
-						OutputName: "data",
-						OutputType: outputType.GetName(),
-						InputType:  inputType.GetName(),
-					}
-				} else {
-					// open type json
-					s.WriteString(fmt.Sprintf("const %s = {\n", outputType.GetName()))
-					// generate fields
-					// "data" comes from template which holds json from fetch call
-					s.WriteString(genField(outputType.Field, "data"))
-					// close type json
-					s.WriteString("}\n")
-					m = Method{
-						Service:    service.GetName(),
-						Name:       method.GetName(),
-						OutputName: outputType.GetName(),
-						Field:      s.String(),
-						OutputType: outputType.GetName(),
-						InputType:  inputType.GetName(),
-					}
+				m := Method{
+					Service:    service.GetName(),
+					Name:       method.GetName(),
+					OutputType: outputType.GetName(),
+					InputType:  inputType.GetName(),
 				}
 
 				Methods = append(Methods, m)
@@ -192,12 +167,8 @@ func main() {
 	parsed := template.Must(template.New("").Parse(blueprint))
 	data := struct {
 		Methods []Method
-		// ServiceName string
-		Exports string
 	}{
 		Methods: Methods,
-		// ServiceName: "Haberdasher",
-		Exports: export(),
 	}
 	var tmp bytes.Buffer
 	if err := parsed.Execute(&tmp, data); err != nil {
@@ -206,19 +177,11 @@ func main() {
 
 	// generate file with functions
 	name := strings.Replace(req.FileToGenerate[0], ".proto", ".ts", -1)
-	content := tmp.String()
+	content := strings.Join(classes, "") + tmp.String()
 	res := &plugin.CodeGeneratorResponse{}
 	res.File = append(res.File, &plugin.CodeGeneratorResponse_File{
 		Name:    &name,
 		Content: &content,
-	})
-
-	// generate file with type definitions
-	interfacesName := "../controllers/" + strings.Replace(req.FileToGenerate[0], ".proto", ".d.ts", -1)
-	interfacesContent := strings.Join(interfaces, "")
-	res.File = append(res.File, &plugin.CodeGeneratorResponse_File{
-		Name:    &interfacesName,
-		Content: &interfacesContent,
 	})
 
 	out, err := proto.Marshal(res)
@@ -228,91 +191,6 @@ func main() {
 	if _, err := os.Stdout.Write(out); err != nil {
 		panic(err)
 	}
-}
-
-func genField(ff []*descriptor.FieldDescriptorProto, id ...string) string {
-	var b bytes.Buffer
-	for i, f := range ff {
-
-		// apped colon when not the last field
-		colon := ","
-		if len(ff)-1 == i {
-			colon = ""
-		}
-
-		// get field type from type map
-		m := messages[f.GetTypeName()]
-
-		if isTimestamp(f.GetTypeName()) {
-			ids := append(id, f.GetName())
-			s := strings.Join(ids, ".")
-			b.WriteString(fmt.Sprintf("%s: %s || \"\"%s\n", f.GetName(), s, colon))
-		} else if isMap(f.GetTypeName()) {
-			nested := messages[f.GetTypeName()]
-			nestedValue := nested.GetField()[1]
-			nestedValueType := messages[nestedValue.GetTypeName()]
-
-			ids := append(id, f.GetName())
-			j := strings.Join(ids, ".")
-
-			// start loop
-			b.WriteString(fmt.Sprintf("%s: Object.entries(%s).reduce((a, [k, v]) => {\n", f.GetName(), j))
-			b.WriteString(fmt.Sprintf("a[k] = {\n"))
-
-			// generate fields
-			b.WriteString(genField(nestedValueType.GetField(), []string{"v"}...))
-
-			// end loop
-			b.WriteString("}\n")
-			b.WriteString("return a\n")
-			b.WriteString(fmt.Sprintf("}, {})%s\n", colon))
-		} else if isRepeated(f.GetLabel()) {
-			ids := append(id, f.GetName())
-			joined := strings.Join(ids, ".")
-
-			// start javascript map function
-			b.WriteString(fmt.Sprintf("%s: %s ? %s.map(v => {\n", f.GetName(), joined, joined))
-			fields := m.GetField()
-			if len(fields) == 0 {
-				// array of primitive values
-				b.WriteString(fmt.Sprintf("return v || %s\n", zv(f.GetType())))
-			} else {
-				// array of complex values, i.e. objects
-
-				// open javascript object
-				b.WriteString("return {\n")
-
-				// generate fields
-				ids := []string{"v"}
-				b.WriteString(genField(fields, ids...))
-
-				// close javascript object
-				b.WriteString("}\n")
-			}
-
-			// close javascript map function
-			b.WriteString(fmt.Sprintf("}) : []%s\n", colon))
-		} else if isMessage(f.GetType()) {
-			ids := append(id, f.GetName())
-
-			// open javascript object for nested fields
-			b.WriteString(fmt.Sprintf("%s: {\n", f.GetName()))
-
-			// generate content of nested fields by calling genField recursively
-			b.WriteString(genField(m.GetField(), ids...))
-
-			// close javascript object for nested fields
-			b.WriteString(fmt.Sprintf("}%s\n", colon))
-		} else {
-
-			// write simple json line
-			// e.g. "key: value || 0"
-			ids := append(id, f.GetName())
-			s := strings.Join(ids, ".")
-			b.WriteString(fmt.Sprintf("%s: %s || %s%s\n", f.GetName(), s, zv(f.GetType()), colon))
-		}
-	}
-	return b.String()
 }
 
 // return zero value for primitive type
@@ -380,18 +258,34 @@ func getTypeScriptType(message *descriptor.DescriptorProto, field *descriptor.Fi
 	return result
 }
 
-// generate last export line for javascript file
-// e.g. "export {MyMethod, MyOtherMethod}"
-func export() string {
-	var b bytes.Buffer
-	b.WriteString("export {")
-	names := []string{}
-	for _, method := range Methods {
-		names = append(names, method.Name)
+func initiate(message *descriptor.DescriptorProto, field *descriptor.FieldDescriptorProto) string {
+	// object string: custom Type, e.g. stats: { [name: string]: Stats }
+	if isMap(field.GetTypeName()) {
+		msg := message.GetNestedType()[0]
+		fields := msg.GetField()
+		value := fields[1]
+		return fmt.Sprintf("this.%s = Object.entries(o.%s).reduce((a, [k, v]) => {a[k] = new %s(v || {}); return a}, {})", field.GetName(), field.GetName(), getTypeScriptType(msg, value))
 	}
-	b.WriteString(strings.Join(names, ", "))
-	b.WriteString("}")
-	return b.String()
+	// array of custom types, e.g. Follower[]
+	if isRepeated(field.GetLabel()) && isMessage(field.GetType()) {
+		parts := strings.Split(field.GetTypeName(), ".")
+		return fmt.Sprintf("this.%s = o.%s ? o.%s.map(v => new %s(v || {})): []", field.GetName(), field.GetName(), field.GetName(), parts[len(parts)-1])
+	}
+	// array of primitive values, e.g. number[]
+	if isRepeated(field.GetLabel()) {
+		return fmt.Sprintf("this.%s = o.%s || []", field.GetName(), field.GetName())
+	}
+	// timestamp
+	if isTimestamp(field.GetTypeName()) {
+		return fmt.Sprintf("this.%s = o.%s || \"\"", field.GetName(), field.GetName())
+	}
+	// custom type, e.g. Match
+	if isMessage(field.GetType()) {
+		parts := strings.Split(field.GetTypeName(), ".")
+		return fmt.Sprintf("this.%s = new %s(o.%s || {})", field.GetName(), parts[len(parts)-1], field.GetName())
+	}
+	// primitive value
+	return fmt.Sprintf("this.%s = o.%s || %s", field.GetName(), field.GetName(), zv(field.GetType()))
 }
 
 func isRepeated(label descriptor.FieldDescriptorProto_Label) bool {
@@ -404,10 +298,6 @@ func isMessage(t descriptor.FieldDescriptorProto_Type) bool {
 
 func isMap(typeName string) bool {
 	return strings.HasSuffix(typeName, "Entry")
-}
-
-func isPrimitive(name string) bool {
-	return name == "StringValue"
 }
 
 // handle well known type .google.protobuf.Timestamp
