@@ -42,6 +42,8 @@ var classes = []string{
 	"export class Empty extends Object{}\n",
 	"\n",
 	"export class StringValue extends String{}\n",
+	"\n",
+	"export class UInt64Value extends Number{}\n",
 }
 
 const class = `
@@ -266,12 +268,7 @@ func initiate(message *descriptor.DescriptorProto, field *descriptor.FieldDescri
 		value := fields[1]
 		return fmt.Sprintf("this.%s = Object.entries(o.%s).reduce((a, [k, v]) => {a[k] = new %s(v || {}); return a}, {})", field.GetName(), field.GetName(), getTypeScriptType(msg, value))
 	}
-	// array of custom types, e.g. Follower[]
-	if isRepeated(field.GetLabel()) && isMessage(field.GetType()) {
-		parts := strings.Split(field.GetTypeName(), ".")
-		return fmt.Sprintf("this.%s = o.%s ? o.%s.map(v => new %s(v || {})): []", field.GetName(), field.GetName(), field.GetName(), parts[len(parts)-1])
-	}
-	// array of primitive values, e.g. number[]
+	// array of primitive values or custom types, e.g. number[] or Follower[]
 	if isRepeated(field.GetLabel()) {
 		return fmt.Sprintf("this.%s = o.%s || []", field.GetName(), field.GetName())
 	}
