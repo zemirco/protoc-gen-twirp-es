@@ -274,7 +274,7 @@ func initiate(message *descriptor.DescriptorProto, field *descriptor.FieldDescri
 	}
 	// timestamp
 	if isTimestamp(field.GetTypeName()) {
-		return fmt.Sprintf("this.%s = o.%s || \"\"", field.GetName(), field.GetName())
+		return fmt.Sprintf("this.%s = o.%s || new Date()", field.GetName(), field.GetName())
 	}
 	// custom type, e.g. Match
 	if isMessage(field.GetType()) {
