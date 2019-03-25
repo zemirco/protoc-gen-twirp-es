@@ -44,6 +44,8 @@ var classes = []string{
 	"export class StringValue extends String{}\n",
 	"\n",
 	"export class UInt64Value extends Number{}\n",
+	"\n",
+	"export class Int64Value extends Number{}\n",
 }
 
 const class = `
