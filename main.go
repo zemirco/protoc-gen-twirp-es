@@ -222,6 +222,13 @@ func zv(t descriptor.FieldDescriptorProto_Type) string {
 	}
 }
 
+// string -> String, boolean -> Boolean, number -> Number but keeps custom types, e.g. User -> User
+// for custom types the type is the same as the constructor.
+func getConstructor(message *descriptor.DescriptorProto, field *descriptor.FieldDescriptorProto) string {
+	t := getTypeScriptType(message, field)
+	return strings.Title(t)
+}
+
 func getTypeScriptType(message *descriptor.DescriptorProto, field *descriptor.FieldDescriptorProto) string {
 	var result string
 	switch field.GetType() {
@@ -268,7 +275,7 @@ func initiate(message *descriptor.DescriptorProto, field *descriptor.FieldDescri
 		msg := message.GetNestedType()[0]
 		fields := msg.GetField()
 		value := fields[1]
-		return fmt.Sprintf("this.%s = Object.entries(o.%s).reduce((a, [k, v]) => {a[k] = new %s(v || {}); return a}, {})", field.GetName(), field.GetName(), getTypeScriptType(msg, value))
+		return fmt.Sprintf("this.%s = Object.entries(o.%s || {}).reduce((a, [k, v]) => {a[k] = new %s(v || {}); return a}, {})", field.GetName(), field.GetName(), getConstructor(msg, value))
 	}
 	// array of primitive values or custom types, e.g. number[] or Follower[]
 	if isRepeated(field.GetLabel()) {
